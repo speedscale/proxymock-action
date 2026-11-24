@@ -1,0 +1,81 @@
+# Runs the action against the tiny service in test/app: a build that answers
+# as recorded must pass, and a build that changed a response must fail.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  passes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the API key secret
+        env:
+          KEY: ${{ secrets.SPEEDSCALE_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::Add a proxymock API key as the repository secret SPEEDSCALE_API_KEY to run these tests"
+            exit 1
+          fi
+      - id: replay
+        uses: ./
+        with:
+          api-key: ${{ secrets.SPEEDSCALE_API_KEY }}
+          in: test/recording
+          app-command: node test/app/server.js
+          mock: 'false'
+          fail-if: requests.response-match-pct < 100
+          artifact-name: proxymock-replay-passes
+      - name: The replay passed
+        env:
+          RESULT: ${{ steps.replay.outputs.result }}
+          SUMMARY: ${{ steps.replay.outputs.summary }}
+          JSON: ${{ steps.replay.outputs.summary-json }}
+          JUNIT: ${{ steps.replay.outputs.junit }}
+        run: |
+          test "$RESULT" = passed
+          grep -q 'proxymock replay: passed' "$SUMMARY"
+          python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["result"] == "passed", s["result"]' "$JSON"
+          test -s "$JUNIT"
+
+  fails:
+    runs-on: ubuntu-latest
+    env:
+      BROKEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the API key secret
+        env:
+          KEY: ${{ secrets.SPEEDSCALE_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::Add a proxymock API key as the repository secret SPEEDSCALE_API_KEY to run these tests"
+            exit 1
+          fi
+      - id: replay
+        uses: ./
+        continue-on-error: true
+        with:
+          api-key: ${{ secrets.SPEEDSCALE_API_KEY }}
+          in: test/recording
+          app-command: node test/app/server.js
+          mock: 'false'
+          fail-if: requests.response-match-pct < 100
+          artifact-name: proxymock-replay-fails
+      - name: The replay failed the step
+        env:
+          OUTCOME: ${{ steps.replay.outcome }}
+          RESULT: ${{ steps.replay.outputs.result }}
+          SUMMARY: ${{ steps.replay.outputs.summary }}
+        run: |
+          test "$OUTCOME" = failure
+          test "$RESULT" = failed
+          grep -q 'proxymock replay: failed' "$SUMMARY"

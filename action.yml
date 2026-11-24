@@ -1,0 +1,170 @@
+name: proxymock replay
+description: Replay recorded traffic against your service with its dependencies mocked, gate the job on the result, and comment on the pull request.
+author: Speedscale
+branding:
+  icon: repeat
+  color: blue
+
+inputs:
+  api-key:
+    description: Your proxymock API key. Store it as a repository secret, such as SPEEDSCALE_API_KEY.
+    required: true
+  in:
+    description: Recorded traffic to replay, and to answer the service's dependencies from, relative to working-directory.
+    default: proxymock/recorded
+  app-command:
+    description: Command that starts your service. The replay starts it, waits for it, and stops it when done. Leave empty to replay against a service already running at test-against.
+    default: ''
+  app-port:
+    description: Port your service listens on.
+    default: '8080'
+  test-against:
+    description: Address to replay against. Defaults to localhost:<app-port>.
+    default: ''
+  mock:
+    description: Answer the service's outbound calls from the recording with proxymock mock.
+    default: 'true'
+  test-config:
+    description: Test config to replay with. The built-in regression config fails the job on a status code that changed and on its goals.
+    default: regression
+  fail-if:
+    description: More gates, one per line, such as requests.response-match-pct < 100 to fail on a changed response body too.
+    default: ''
+  out:
+    description: Directory the replay writes its results to.
+    default: proxymock/results/ci
+  junit:
+    description: JUnit report to write, for test reporters.
+    default: proxymock-junit.xml
+  comment:
+    description: Comment on the pull request with the result. A pull request from a fork gets a read-only token, so its comment is skipped without failing the job.
+    default: 'true'
+  github-token:
+    description: Token the pull request comment is posted with.
+    default: ${{ github.token }}
+  webhook-url:
+    description: Post the result to this Slack incoming webhook or JSON webhook when the replay fails. Store it as a secret.
+    default: ''
+  upload-artifact:
+    description: Keep the replay results, the JUnit report and the logs as a workflow artifact.
+    default: 'true'
+  artifact-name:
+    description: Name of that artifact.
+    default: proxymock-replay
+  version:
+    description: proxymock version to install, such as v2.5.1476. Defaults to the latest.
+    default: ''
+  working-directory:
+    description: Directory to run in, relative to the repository root.
+    default: .
+
+outputs:
+  result:
+    description: passed or failed.
+    value: ${{ steps.replay.outputs.result }}
+  exit-code:
+    description: proxymock replay's exit code.
+    value: ${{ steps.replay.outputs.exit-code }}
+  summary:
+    description: Path of the Markdown summary, replay-summary.md.
+    value: ${{ steps.replay.outputs.summary }}
+  summary-json:
+    description: Path of the machine-readable summary, replay-summary.json.
+    value: ${{ steps.replay.outputs.summary-json }}
+  junit:
+    description: Path of the JUnit report.
+    value: ${{ steps.replay.outputs.junit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install proxymock
+      shell: bash
+      env:
+        SPEEDSCALE_API_KEY: ${{ inputs.api-key }}
+        PROXYMOCK_VERSION: ${{ inputs.version }}
+      run: |
+        sh -c "$(curl -Lfs https://downloads.speedscale.com/proxymock/install-proxymock)" -- "$PROXYMOCK_VERSION"
+        echo "$HOME/.speedscale" >> "$GITHUB_PATH"
+        "$HOME/.speedscale/proxymock" init --api-key "$SPEEDSCALE_API_KEY"
+
+    - name: Mock dependencies
+      if: inputs.mock == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        IN: ${{ inputs.in }}
+      run: |
+        # runs for the rest of the job, answering the service's outbound calls
+        nohup proxymock mock --in "$IN" --log-to proxymock-mock.log > /dev/null 2>&1 &
+
+    - name: Replay
+      id: replay
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        IN: ${{ inputs.in }}
+        APP_COMMAND: ${{ inputs.app-command }}
+        APP_PORT: ${{ inputs.app-port }}
+        TEST_AGAINST: ${{ inputs.test-against }}
+        TEST_CONFIG: ${{ inputs.test-config }}
+        FAIL_IF: ${{ inputs.fail-if }}
+        OUT: ${{ inputs.out }}
+        JUNIT: ${{ inputs.junit }}
+      run: |
+        args=(replay --in "$IN" --test-against "${TEST_AGAINST:-localhost:$APP_PORT}" --out "$OUT" --junit "$JUNIT" --log-to proxymock-replay.log)
+        if [ -n "$TEST_CONFIG" ]; then args+=(--test-config "$TEST_CONFIG"); fi
+        while IFS= read -r gate; do
+          gate="$(echo "$gate" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -n "$gate" ]; then args+=(--fail-if "$gate"); fi
+        done <<< "$FAIL_IF"
+        if [ -n "$APP_COMMAND" ]; then args+=(--app-log-to proxymock-app.log -- sh -c "$APP_COMMAND"); fi
+        set +e
+        proxymock "${args[@]}"
+        code=$?
+        set -e
+        result=passed
+        if [ "$code" -ne 0 ]; then result=failed; fi
+        {
+          echo "exit-code=$code"
+          echo "result=$result"
+          echo "summary=$OUT/replay-summary.md"
+          echo "summary-json=$OUT/replay-summary.json"
+          echo "junit=$JUNIT"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Comment on the pull request
+      if: always() && inputs.comment == 'true' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        OUT: ${{ inputs.out }}
+      run: proxymock ci comment "$OUT" || echo "::warning::proxymock could not comment on the pull request; the result is in the job summary"
+
+    - name: Post to the webhook
+      if: always() && inputs.webhook-url != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROXYMOCK_WEBHOOK_URL: ${{ inputs.webhook-url }}
+        OUT: ${{ inputs.out }}
+      run: proxymock ci notify "$OUT" || echo "::warning::proxymock could not post to the webhook"
+
+    - name: Keep the replay results
+      if: always() && inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: |
+          ${{ inputs.working-directory }}/${{ inputs.out }}
+          ${{ inputs.working-directory }}/${{ inputs.junit }}
+          ${{ inputs.working-directory }}/proxymock-*.log
+        if-no-files-found: ignore
+
+    - name: Fail when the replay failed
+      if: steps.replay.outputs.exit-code != '0'
+      shell: bash
+      env:
+        CODE: ${{ steps.replay.outputs.exit-code }}
+      run: exit "${CODE:-1}"
