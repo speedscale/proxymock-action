@@ -11,7 +11,7 @@ inputs:
     required: true
   in:
     description: Recorded traffic to replay, and to answer the service's dependencies from, relative to working-directory.
-    default: proxymock/recorded
+    default: proxymock
   app-command:
     description: Command that starts your service. The replay starts it, waits for it, and stops it when done. Leave empty to replay against a service already running at test-against.
     default: ''

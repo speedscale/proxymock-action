@@ -29,7 +29,6 @@ jobs:
       - uses: speedscale/proxymock-action@v1
         with:
           api-key: ${{ secrets.SPEEDSCALE_API_KEY }}
-          in: proxymock/recorded
           app-command: ./start-your-service
           app-port: 8080
 ```
@@ -57,7 +56,7 @@ Each line of `fail-if` is one `proxymock replay --fail-if` condition. Fields tha
 | Input | Default | Description |
 | --- | --- | --- |
 | `api-key` | required | Your proxymock API key. |
-| `in` | `proxymock/recorded` | Recorded traffic to replay and to answer the dependencies from. |
+| `in` | `proxymock` | Recorded traffic to replay and to answer the dependencies from: the proxymock workspace by default, whose results are left out. |
 | `app-command` | | Command that starts your service. Leave empty to replay against a service already running at `test-against`. |
 | `app-port` | `8080` | Port your service listens on. |
 | `test-against` | `localhost:<app-port>` | Address to replay against. |
