@@ -101,7 +101,18 @@ runs:
       run: |
         # runs for the rest of the job, answering the service's outbound calls;
         # MOCK_ARGS is split into words on purpose, like a command line
-        nohup proxymock mock --in "$IN" --log-to proxymock-mock.log $MOCK_ARGS > /dev/null 2>&1 &
+        nohup proxymock mock --in "$IN" --log-to proxymock-mock.log --health-port 4199 $MOCK_ARGS \
+          > proxymock-mock-output.log 2>&1 &
+        mock_pid=$!
+        # The service can connect to a mapped port the moment it starts, so wait for the mock.
+        for _ in $(seq 1 60); do
+          if curl -sf -o /dev/null http://localhost:4199/; then exit 0; fi
+          if ! kill -0 "$mock_pid" 2>/dev/null; then
+            echo "::error::proxymock mock exited before it was ready"; cat proxymock-mock-output.log; exit 1
+          fi
+          sleep 1
+        done
+        echo "::error::proxymock mock was not ready after 60 seconds"; tail -20 proxymock-mock-output.log; exit 1
 
     - name: Replay
       id: replay

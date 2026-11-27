@@ -74,7 +74,7 @@ Each line of `fail-if` is one `proxymock replay --fail-if` condition. Fields tha
 | `app-command` | | Command that starts your service. Leave empty to replay against a service already running at `test-against`. |
 | `app-port` | `8080` | Port your service listens on. |
 | `test-against` | `localhost:<app-port>` | Address to replay against. |
-| `mock` | `true` | Answer the service's outbound calls from the recording. |
+| `mock` | `true` | Answer the service's outbound calls from the recording. The service starts once the mock is ready, checked on port 4199. |
 | `mock-args` | | More arguments for `proxymock mock`, such as `--map 65432=postgres://localhost:5432`. |
 | `test-config` | `regression` | Test config to replay with. |
 | `fail-if` | | More gates, one per line. |
