@@ -24,6 +24,9 @@ inputs:
   mock:
     description: Answer the service's outbound calls from the recording with proxymock mock.
     default: 'true'
+  mock-args:
+    description: More arguments for proxymock mock, such as --map 65432=postgres://localhost:5432 for a database driver that ignores proxy environment variables. Point the service at the mapped port.
+    default: ''
   test-config:
     description: Test config to replay with. The built-in regression config fails the job on a status code that changed and on its goals.
     default: regression
@@ -94,9 +97,11 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         IN: ${{ inputs.in }}
+        MOCK_ARGS: ${{ inputs.mock-args }}
       run: |
-        # runs for the rest of the job, answering the service's outbound calls
-        nohup proxymock mock --in "$IN" --log-to proxymock-mock.log > /dev/null 2>&1 &
+        # runs for the rest of the job, answering the service's outbound calls;
+        # MOCK_ARGS is split into words on purpose, like a command line
+        nohup proxymock mock --in "$IN" --log-to proxymock-mock.log $MOCK_ARGS > /dev/null 2>&1 &
 
     - name: Replay
       id: replay

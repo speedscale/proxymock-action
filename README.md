@@ -35,6 +35,20 @@ jobs:
 
 Add your proxymock API key as the repository secret `SPEEDSCALE_API_KEY`. `proxymock ci init github` writes this workflow for you.
 
+## Databases
+
+Most database drivers ignore proxy environment variables, so proxymock answers them on a mapped port. Map a local port to the database the recording was made against, and point the service at that port:
+
+```yaml
+      - uses: speedscale/proxymock-action@v1
+        with:
+          api-key: ${{ secrets.SPEEDSCALE_API_KEY }}
+          app-command: DB_PORT=65432 ./server
+          mock-args: --map 65432=postgres://localhost:5432
+```
+
+Record the same way, with `proxymock record --map 65432=postgres://localhost:5432`. Build the service in an earlier step: the replay gives `app-command` 30 seconds to start listening.
+
 ## What fails the job
 
 The built-in `regression` test config fails the job when a request's status code changed, and on the goals the config sets. A response body that changed is reported but does not fail the job by default. Add a gate to fail on it too:
@@ -61,6 +75,7 @@ Each line of `fail-if` is one `proxymock replay --fail-if` condition. Fields tha
 | `app-port` | `8080` | Port your service listens on. |
 | `test-against` | `localhost:<app-port>` | Address to replay against. |
 | `mock` | `true` | Answer the service's outbound calls from the recording. |
+| `mock-args` | | More arguments for `proxymock mock`, such as `--map 65432=postgres://localhost:5432`. |
 | `test-config` | `regression` | Test config to replay with. |
 | `fail-if` | | More gates, one per line. |
 | `out` | `proxymock/results/ci` | Directory the replay writes its results to. |
